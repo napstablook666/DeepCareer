@@ -23,6 +23,14 @@ wheels/
 .installed.cfg
 *.egg
 
+
+# 前端依赖
+node_modules/
+frontend/node_modules/
+
+# 调试/计划文件（不提交 GitHub）
+debug_list_page.*
+plan.md
 # 环境变量
 .env
 .env.local
