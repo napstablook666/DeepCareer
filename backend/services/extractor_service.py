@@ -10,6 +10,7 @@ from datetime import datetime
 import json
 import asyncio
 import concurrent.futures
+import unicodedata
 
 from backend.services.openai_service import OpenAIService
 from backend.utils.logger import logger
@@ -85,6 +86,27 @@ class ExtractorService:
     def calculate_content_hash(self, text: str) -> str:
         """计算文本哈希（用于缓存）"""
         return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def _extract_section(
+        text: str,
+        start_markers: List[str],
+        end_markers: List[str],
+    ) -> str:
+        """按独立标题提取章节，避免把相邻章节内容混在一起。"""
+        starts = "|".join(re.escape(marker) for marker in start_markers)
+        ends = "|".join(re.escape(marker) for marker in end_markers)
+        match = re.search(
+            rf"^[ \t]*(?:{starts})[ \t]*(?:[：:]|(?=\r?$))(?P<body>.*?)(?=^[ \t]*(?:{ends})[ \t]*(?:[：:]|(?=\r?$))|\Z)",
+            text,
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
+        )
+        return match.group("body").strip() if match else ""
+
+    @staticmethod
+    def _section_lines(section: str) -> List[str]:
+        """清理章节文本中的空行，保留 PDF 提取出的行结构。"""
+        return [line.strip() for line in section.splitlines() if line.strip()]
     
     def extract_resume(
         self, 
@@ -103,10 +125,11 @@ class ExtractorService:
         Returns:
             (structured_data, confidence, method)
         """
+        text = unicodedata.normalize("NFKC", text)
         logger.info(f"开始提取简历，长度: {len(text)}，use_llm={use_llm}, force_llm={force_llm}")
         
-        # 强制使用大模型
-        if force_llm and use_llm:
+        # 用户选择 AI 或接口要求强制 AI 时，始终走大模型路径。
+        if use_llm:
             return self._extract_resume_by_llm(text)
         
         # 先尝试规则提取
@@ -254,43 +277,77 @@ class ExtractorService:
             result['skills'] = keywords[:10]
             confidence_scores.append(0.5)
         
-        # 4. 提取工作经历
-        experiences = []
-        # 查找工作经历章节
-        exp_section_match = re.search(
-            r'(?:工作经[历验]|项目经[历验]|工作履历)[：:](.*?)(?=教育背景|技能|自我评价|$)',
+        # 4. 提取工作/实习经历
+        section_headers = [
+            '工作经历', '工作经验', '工作履历', '职业经历', '任职经历',
+            '实习经历', '实习经验', '项目经历', '项目经验', '项目履历',
+            '主要项目', '教育背景', '教育经历', '学历', '技能', '技能特长',
+            '技能特⻓', '专业技能', '技术栈', '自我评价', '个人简介',
+            '获奖荣誉', '获奖经历', '奖项', '荣誉', '奖学金', '证书',
+            '资格证书', '专业证书',
+        ]
+        work_section = self._extract_section(
             text,
-            re.DOTALL | re.IGNORECASE
+            ['工作经历', '工作经验', '工作履历', '职业经历', '任职经历', '实习经历', '实习经验'],
+            section_headers,
         )
-        
-        if exp_section_match:
-            exp_text = exp_section_match.group(1)
-            # 匹配每段经历（日期 + 公司/职位）
-            exp_pattern = r'(\d{4}[.\-/年]\d{1,2}.*?(?:\d{4}[.\-/年]\d{1,2}|至今|现在))\s*([^\n]{5,100})'
-            for match in re.finditer(exp_pattern, exp_text):
-                date_range = match.group(1).strip()
-                content = match.group(2).strip()
-                
-                # 尝试分离公司和职位
-                company = None
-                for comp in self.companies:
-                    if comp in content:
-                        company = comp
-                        break
-                
-                experiences.append({
-                    'period': date_range,
-                    'company': company,
-                    'description': content
-                })
-            
-            if experiences:
-                result['work_experiences'] = experiences
-                confidence_scores.append(0.9)
+        work_lines = self._section_lines(work_section)
+        date_range_pattern = re.compile(
+            r'(?P<start>\d{4}(?:[.\-/]\d{1,2}|年\d{1,2}月?))\s*'
+            r'(?:-|—|–|－|至|到)\s*'
+            r'(?P<end>\d{4}(?:[.\-/]\d{1,2}|年\d{1,2}月?)|至今|现在)'
+        )
+        experience_headers = [
+            (index, date_range_pattern.search(line))
+            for index, line in enumerate(work_lines)
+        ]
+        experience_headers = [item for item in experience_headers if item[1]]
+        experiences = []
+
+        for header_index, date_match in experience_headers:
+            line = work_lines[header_index]
+            before_date = line[:date_match.start()].strip(' ,，')
+            after_date = line[date_match.end():].strip(' ,，')
+            header = before_date or after_date
+            position = header
+            company = None
+
+            at_parts = re.split(r'\s+(?:at|@)\s+', header, maxsplit=1, flags=re.IGNORECASE)
+            if len(at_parts) == 2:
+                position = at_parts[0].strip()
+                company = re.split(r'\s*[,，]\s*', at_parts[1], maxsplit=1)[0].strip()
             else:
-                confidence_scores.append(0.3)
-        else:
-            confidence_scores.append(0.0)
+                for known_company in self.companies:
+                    if known_company in header:
+                        company = known_company
+                        position = header.replace(known_company, '').strip(' ,，-')
+                        break
+
+            next_header_index = len(work_lines)
+            for candidate_index, _ in experience_headers:
+                if candidate_index > header_index:
+                    next_header_index = candidate_index
+                    break
+            description_lines = work_lines[header_index + 1:next_header_index]
+            achievements = [
+                line for line in description_lines
+                if re.search(r'获评|获得|锦旗|优秀|提升|成果|完成', line)
+            ]
+            experience = {
+                'period': date_match.group(0).strip(),
+                'start_date': date_match.group('start'),
+                'end_date': date_match.group('end'),
+                'company': company,
+                'position': position,
+                'description': ' '.join(description_lines),
+                'responsibilities': description_lines,
+            }
+            if achievements:
+                experience['achievements'] = achievements
+            experiences.append(experience)
+
+        result['work_experiences'] = experiences
+        confidence_scores.append(0.9 if experiences else 0.0)
         
         # 5. 提取当前职位和公司
         current_position_patterns = [
@@ -315,30 +372,71 @@ class ExtractorService:
         else:
             confidence_scores.append(0.5)
         
-        # 6. 提取项目经历
-        project_experiences = []
-        proj_section_match = re.search(
-            r'(?:项目经[历验])[：:]?(.*?)(?=工作经[历验]|教育背景|技能|自我评价|获奖|证书|$)',
+        # 6. 提取获奖荣誉
+        awards_section = self._extract_section(
             text,
-            re.DOTALL | re.IGNORECASE
+            ['获奖荣誉', '获奖经历', '奖项', '荣誉', '奖学金'],
+            section_headers,
         )
-        
-        if proj_section_match:
-            proj_text = proj_section_match.group(1)
-            proj_pattern = r'(?:项目名称[：:]|●|•|\d+[.、])\s*([^\n]{2,50})'
-            for match in re.finditer(proj_pattern, proj_text):
-                project_name = match.group(1).strip()
+        awards = []
+        award_lines = self._section_lines(awards_section)
+        trailing_date_pattern = re.compile(
+            r'(?P<date>(?:19|20)\d{2}(?:[.\-/]\d{1,2})?)\s*$'
+        )
+        for line in award_lines:
+            if awards and re.match(r'^(?:因|由于|在|通过|参与|负责|并且|同时)', line):
+                previous = awards[-1].get('description', '')
+                awards[-1]['description'] = f'{previous} {line}'.strip()
+                continue
+
+            date_match = trailing_date_pattern.search(line)
+            award_date = date_match.group('date') if date_match else None
+            content = line[:date_match.start()].rstrip(' -—–―－') if date_match else line
+            parts = re.split(r'\s+[—–―－-]\s+', content, maxsplit=1)
+            award = {
+                'name': parts[0].strip(),
+                'issuer': parts[1].strip() if len(parts) == 2 else None,
+                'date': award_date,
+                'description': '',
+            }
+            if award['name']:
+                awards.append(award)
+
+        result['awards'] = awards
+        confidence_scores.append(0.8 if awards else 0.3)
+
+        # 7. 提取项目经历
+        project_section = self._extract_section(
+            text,
+            ['项目经历', '项目经验', '项目履历', '主要项目'],
+            section_headers,
+        )
+        project_experiences = []
+        project_lines = self._section_lines(project_section)
+        for line in project_lines:
+            project_match = re.match(
+                r'(?:项目名称[：:]|[●•▪·]|\d+[.、])\s*(.+)',
+                line,
+            )
+            if project_match:
+                project_name = project_match.group(1).strip()
                 if len(project_name) > 2:
                     project_experiences.append({'name': project_name})
-        
-        if project_experiences:
-            result['project_experiences'] = project_experiences
-            confidence_scores.append(0.8)
-        else:
-            result['project_experiences'] = []
-            confidence_scores.append(0.5)
-        
-        # 7. 提取证书
+
+        # 一些简历将“项目 + 获奖”写在获奖章节中，保留项目名避免信息丢失。
+        if not project_experiences:
+            for award in awards:
+                if '项目' in award['name']:
+                    project_experiences.append({
+                        'name': award['name'],
+                        'description': award.get('description', ''),
+                        'achievements': [award.get('issuer')] if award.get('issuer') else [],
+                    })
+
+        result['project_experiences'] = project_experiences
+        confidence_scores.append(0.8 if project_experiences else 0.5)
+
+        # 8. 提取证书
         certifications = []
         cert_keywords = [
             'PMP', 'CPA', 'CFA', 'CISSP', 'AWS', 'Azure', 'GCP',
@@ -431,7 +529,7 @@ class ExtractorService:
 请从以下简历文本中提取完整的结构化信息，以JSON格式返回。请尽可能提取所有信息。
 
 **简历文本：**
-{text[:4000]}  
+{text[:12000]}
 
 **要求输出JSON格式（只返回JSON，不要其他文字）：**
 {{

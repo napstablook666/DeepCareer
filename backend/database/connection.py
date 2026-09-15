@@ -7,6 +7,7 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+from loguru import logger
 
 from backend.config import settings
 
@@ -83,8 +84,11 @@ async def init_db():
     from backend.models.search_history import SearchHistory
     
     async with engine.begin() as conn:
-        # 创建 pgvector 扩展
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        if settings.USE_PGVECTOR:
+            # pgvector 模式要求数据库服务器已安装 vector 扩展。
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        else:
+            logger.warning("pgvector 未启用，向量字段将使用 JSONB 保存，匹配在应用层计算")
         
         # 创建所有表
         await conn.run_sync(Base.metadata.create_all)

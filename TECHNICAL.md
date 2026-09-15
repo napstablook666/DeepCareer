@@ -729,7 +729,7 @@ async def smart_match_workflow(resume_text: str, preferences: dict):
 | ORM | SQLAlchemy 2.0 | 异步支持、成熟稳定 |
 | 数据库 | PostgreSQL + pgvector | 向量搜索原生支持 |
 | 爬虫 | Playwright | 渲染 JS、反检测能力强 |
-| Embedding | Sentence-Transformers | 本地运行、中文支持好 |
+| Embedding / Rerank | 模力方舟 Serverless API | `bge-m3` + `bge-reranker-v2-m3` |
 | 缓存 | Redis | 高性能、支持过期 |
 
 ---
@@ -846,33 +846,40 @@ weights = {
 
 ### 3. 向量服务 (EmbeddingService)
 
-本地 Embedding 生成，无需云服务。
+通过模力方舟远程接口生成 Embedding，并对候选职位执行 Rerank。
 
 #### 模型选择
 
 ```python
-# 推荐模型（中文优化）
-model = "paraphrase-multilingual-MiniLM-L12-v2"
-# 向量维度: 384
-# 特点: 多语言支持、轻量级、中文效果好
+# 模力方舟免费模型
+embedding_model = "bge-m3"
+rerank_model = "bge-reranker-v2-m3"
+# bge-m3 向量维度: 1024
 ```
 
 #### 使用方式
 
 ```python
-from backend.services.embedding_service import LocalEmbeddingService
+from backend.utils.embedding_service import get_embedding_service
 
-service = LocalEmbeddingService()
+service = get_embedding_service()
 
 # 单个文本
-embedding = service.get_embedding("Python后端开发工程师")
-# → [0.123, -0.456, ...] (384维)
+embedding = service.create_embedding("Python后端开发工程师")
+# → [0.123, -0.456, ...] (1024维)
 
 # 批量文本
-embeddings = service.get_embeddings([
+embeddings = service.create_embedding([
     "Python后端开发",
     "Java开发工程师"
 ])
+
+# 对候选职位重排
+ranked = service.rerank(
+    query="Python后端开发工程师",
+    documents=["Python API 开发", "Java 前端开发"],
+    top_n=2,
+)
 ```
 
 #### 相似度计算
@@ -1118,7 +1125,7 @@ CREATE TABLE resumes_v2 (
     extraction_confidence FLOAT,
     
     -- 向量
-    text_embedding VECTOR(384),
+    text_embedding VECTOR(1024),
     
     -- 时间戳
     created_at TIMESTAMP DEFAULT NOW(),
@@ -1154,7 +1161,7 @@ CREATE TABLE jobs_v2 (
     structured_data JSONB,
     
     -- 向量
-    description_embedding VECTOR(384),
+    description_embedding VECTOR(1024),
     
     -- 来源
     platform VARCHAR(50),

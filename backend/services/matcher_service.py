@@ -5,8 +5,9 @@ from typing import Dict, List, Tuple, Optional, Any
 import re
 
 from backend.services.openai_service import OpenAIService
-from backend.utils.local_embedding import LocalEmbeddingService
+from backend.utils.embedding_service import get_embedding_service
 from backend.utils.logger import logger
+from backend.config import settings
 
 
 class MatcherService:
@@ -14,7 +15,7 @@ class MatcherService:
     
     def __init__(self):
         self.openai_service = OpenAIService()
-        self.embedding_service = LocalEmbeddingService()
+        self.embedding_service = get_embedding_service()
     
     def fast_match(
         self,
@@ -91,12 +92,8 @@ class MatcherService:
         
         # 4. 语义相似度（15%权重）
         # 注意：embedding 可能是 NumPy 数组，不能直接用 if arr 判断
-        has_resume_emb = resume_embedding is not None and (
-            hasattr(resume_embedding, '__len__') and len(resume_embedding) > 0
-        )
-        has_job_emb = job_embedding is not None and (
-            hasattr(job_embedding, '__len__') and len(job_embedding) > 0
-        )
+        has_resume_emb = self._is_compatible_embedding(resume_embedding)
+        has_job_emb = self._is_compatible_embedding(job_embedding)
         
         if has_resume_emb and has_job_emb:
             semantic_score = self._calculate_cosine_similarity(
@@ -107,7 +104,15 @@ class MatcherService:
             details['semantic'] = {'score': semantic_score, 'method': 'embedding'}
         else:
             scores['semantic'] = 50.0
-            details['semantic'] = {'score': 50.0, 'method': 'not_available'}
+            details['semantic'] = {
+                'score': 50.0,
+                'method': (
+                    'dimension_mismatch'
+                    if resume_embedding is not None and job_embedding is not None
+                    else 'not_available'
+                ),
+                'expected_dimension': settings.EMBEDDING_DIMENSION,
+            }
         
         # 5. 计算总分
         # 职位方向和学历是硬性门槛，权重要大
@@ -130,6 +135,86 @@ class MatcherService:
         
         logger.info(f"快速匹配完成，总分: {total_score:.2f}")
         return total_score, result
+
+    def apply_rerank(
+        self,
+        query_text: str,
+        matches: List[Dict[str, Any]],
+        documents: List[str],
+    ) -> List[Dict[str, Any]]:
+        """使用模力方舟重排候选职位，并更新语义维度分数。"""
+        if len(matches) != len(documents):
+            raise ValueError("匹配结果与重排文档数量不一致")
+        if not matches:
+            return []
+
+        candidate_limit = min(
+            len(matches),
+            max(1, settings.RERANK_CANDIDATE_LIMIT),
+        )
+        candidate_indices = sorted(
+            range(len(matches)),
+            key=lambda index: float(matches[index].get("match_score", 0.0)),
+            reverse=True,
+        )[:candidate_limit]
+        candidate_documents = [
+            str(documents[index] or "")[:4000]
+            for index in candidate_indices
+        ]
+
+        rerank_results = self.embedding_service.rerank(
+            query=str(query_text or "")[:6000],
+            documents=candidate_documents,
+            top_n=len(candidate_documents),
+        )
+
+        for rerank_result in rerank_results:
+            selected_index = rerank_result["index"]
+            original_index = candidate_indices[selected_index]
+            match = matches[original_index]
+            score = float(rerank_result["score"])
+            details = match.get("match_details")
+            if not isinstance(details, dict):
+                details = {}
+                match["match_details"] = details
+
+            details["rerank"] = {
+                "score": round(score * 100, 2),
+                "model": settings.MAGIC_ARK_RERANK_MODEL,
+            }
+
+            dimension_scores = details.get("dimension_scores")
+            weights = details.get("weights")
+            if not isinstance(dimension_scores, dict) or not isinstance(weights, dict):
+                continue
+
+            embedding_score = dimension_scores.get("semantic")
+            dimension_scores["semantic"] = round(score * 100, 2)
+            details["semantic"] = {
+                "score": round(score * 100, 2),
+                "method": "embedding+rerank",
+                "embedding_score": embedding_score,
+                "rerank_model": settings.MAGIC_ARK_RERANK_MODEL,
+            }
+
+            try:
+                match["match_score"] = round(
+                    sum(
+                        float(dimension_scores[key]) * float(weight)
+                        for key, weight in weights.items()
+                    ),
+                    2,
+                )
+            except (KeyError, TypeError, ValueError):
+                logger.warning(
+                    "重排分数已返回，但匹配详情缺少可重算的维度权重"
+                )
+
+        return sorted(
+            matches,
+            key=lambda match: float(match.get("match_score", 0.0)),
+            reverse=True,
+        )
     
     def _match_position_direction(
         self,
@@ -554,6 +639,15 @@ class MatcherService:
             return 0.0
         
         return float(dot_product / (magnitude1 * magnitude2))
+
+    @staticmethod
+    def _is_compatible_embedding(embedding: Optional[List[float]]) -> bool:
+        """只使用当前远程模型维度的向量，兼容旧库中的历史向量。"""
+        return (
+            embedding is not None
+            and hasattr(embedding, '__len__')
+            and len(embedding) == settings.EMBEDDING_DIMENSION
+        )
     
     def precise_match(
         self,

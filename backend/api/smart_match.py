@@ -24,7 +24,7 @@ from backend.models.match_record import MatchRecord
 from backend.services.matcher_service import MatcherService
 from backend.services.extractor_service import ExtractorService
 from backend.crawlers.boss_web_crawler_playwright import BossWebCrawlerPlaywright
-from backend.utils.local_embedding import LocalEmbeddingService
+from backend.utils.embedding_service import get_embedding_service
 from backend.utils.logger import logger
 from backend.config import settings
 
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/v2/smart-match", tags=["智能匹配"])
 
 matcher = MatcherService()
 extractor = ExtractorService()
-embedding_service = LocalEmbeddingService()
+embedding_service = get_embedding_service()
 
 
 class SmartMatchRequest(BaseModel):
@@ -110,6 +110,29 @@ def extract_search_keywords(resume_data: dict) -> List[str]:
         keywords = ['开发工程师', 'Python', 'Java']
     
     return keywords[:5]  # 最多5个关键词
+
+
+def rerank_and_partition(
+    query_text: str,
+    matches: List[dict],
+    documents: List[str],
+    qualified_threshold: float,
+) -> tuple[List[dict], List[dict]]:
+    """批量重排候选职位，并按重排后的综合分数重新分组。"""
+    reranked_matches = matcher.apply_rerank(
+        query_text=query_text,
+        matches=matches,
+        documents=documents,
+    )
+    qualified_matches = []
+    unqualified_matches = []
+    for match in reranked_matches:
+        match["is_qualified"] = match["match_score"] >= qualified_threshold
+        if match["is_qualified"]:
+            qualified_matches.append(match)
+        else:
+            unqualified_matches.append(match)
+    return qualified_matches, unqualified_matches
 
 
 async def crawl_jobs_for_keywords(
@@ -211,8 +234,10 @@ async def crawl_jobs_for_keywords(
             # 生成向量
             try:
                 embedding = embedding_service.create_embedding(full_desc[:1000])
-            except:
-                embedding = None
+            except Exception as e:
+                raise RuntimeError(
+                    f"模力方舟 Embedding 生成失败: {e}"
+                ) from e
             
             if existing:
                 # 更新已存在的职位
@@ -347,8 +372,8 @@ async def smart_match_stream(
             db_jobs = db_jobs_result.scalars().all()
             
             # 5. 计算匹配分数
-            qualified_matches = []
-            unqualified_matches = []
+            db_candidates = []
+            db_documents = []
             
             for job in db_jobs:
                 try:
@@ -378,13 +403,20 @@ async def smart_match_stream(
                         'from_crawler': False
                     }
                     
-                    if score >= request.qualified_threshold:
-                        qualified_matches.append(match_item)
-                    else:
-                        unqualified_matches.append(match_item)
+                    db_candidates.append(match_item)
+                    db_documents.append(job.full_description or job.title or "")
                 except Exception as e:
                     logger.error(f"匹配职位 {job.id} 失败: {e}")
                     continue
+
+            qualified_matches, unqualified_matches = rerank_and_partition(
+                query_text=resume.full_text or json.dumps(
+                    resume_data, ensure_ascii=False
+                ),
+                matches=db_candidates,
+                documents=db_documents,
+                qualified_threshold=request.qualified_threshold,
+            )
             
             # 排序
             qualified_matches.sort(key=lambda x: x['match_score'], reverse=True)
@@ -406,6 +438,7 @@ async def smart_match_stream(
                 
                 # 爬虫搜索（使用新的数据库会话）
                 crawler_matches = []
+                crawler_documents = []
                 existing_job_ids = [m['job_id'] for m in all_db_matches]
                 
                 try:
@@ -454,16 +487,27 @@ async def smart_match_stream(
                                         'from_database': False,
                                         'from_crawler': True
                                     }
-                                    
                                     crawler_matches.append(match_item)
+                                    crawler_documents.append(
+                                        job.full_description or job.title or ""
+                                    )
                                     existing_job_ids.append(job.id)
-                                    
-                                    # 每找到一个新职位就推送
-                                    yield f"data: {json.dumps({'type': 'crawler_match', 'data': match_item}, ensure_ascii=False)}\n\n"
-                                    
                                 except Exception as e:
                                     logger.error(f"匹配爬取职位失败: {e}")
                                     continue
+
+                        crawler_matches = matcher.apply_rerank(
+                            query_text=resume.full_text or json.dumps(
+                                resume_data, ensure_ascii=False
+                            ),
+                            matches=crawler_matches,
+                            documents=crawler_documents,
+                        )
+                        for match_item in crawler_matches:
+                            match_item["is_qualified"] = (
+                                match_item["match_score"] >= request.qualified_threshold
+                            )
+                            yield f"data: {json.dumps({'type': 'crawler_match', 'data': match_item}, ensure_ascii=False)}\n\n"
                     
                     logger.info(f"🕷️ 爬虫完成: 新增{len(crawler_matches)}个匹配")
                     
@@ -559,8 +603,8 @@ async def smart_match(
     logger.info(f"📊 数据库中【{city}】有 {len(db_jobs)} 个活跃职位")
     
     # 5. 计算匹配分数
-    qualified_matches = []  # 合格的（>=60%）
-    unqualified_matches = []  # 不合格的（<60%但>=min_display_score）
+    db_candidates = []
+    db_documents = []
     
     for job in db_jobs:
         try:
@@ -591,14 +635,18 @@ async def smart_match(
                 'from_crawler': False
             }
             
-            if score >= request.qualified_threshold:
-                qualified_matches.append(match_item)
-            else:
-                unqualified_matches.append(match_item)
-                
+            db_candidates.append(match_item)
+            db_documents.append(job.full_description or job.title or "")
         except Exception as e:
             logger.error(f"匹配职位 {job.id} 失败: {e}")
             continue
+
+    qualified_matches, unqualified_matches = rerank_and_partition(
+        query_text=resume.full_text or json.dumps(resume_data, ensure_ascii=False),
+        matches=db_candidates,
+        documents=db_documents,
+        qualified_threshold=request.qualified_threshold,
+    )
     
     # 排序
     qualified_matches.sort(key=lambda x: x['match_score'], reverse=True)
@@ -626,6 +674,8 @@ async def smart_match(
             )
             
             # 对爬取的职位计算匹配分数
+            crawler_candidates = []
+            crawler_documents = []
             for crawled in crawled_jobs:
                 # 检查是否已在匹配列表中
                 all_job_ids = [m['job_id'] for m in qualified_matches + unqualified_matches]
@@ -666,17 +716,32 @@ async def smart_match(
                             'from_crawler': True
                         }
                         
-                        if score >= request.qualified_threshold:
-                            qualified_matches.append(match_item)
-                        else:
-                            unqualified_matches.append(match_item)
+                        crawler_candidates.append(match_item)
+                        crawler_documents.append(
+                            job.full_description or job.title or ""
+                        )
                         
                         from_crawler_count += 1
                     except Exception as e:
                         logger.error(f"匹配爬取职位失败: {e}")
                         continue
             
-            # 重新排序
+            crawler_candidates = matcher.apply_rerank(
+                query_text=resume.full_text or json.dumps(
+                    resume_data, ensure_ascii=False
+                ),
+                matches=crawler_candidates,
+                documents=crawler_documents,
+            )
+            for match_item in crawler_candidates:
+                match_item["is_qualified"] = (
+                    match_item["match_score"] >= request.qualified_threshold
+                )
+                if match_item["is_qualified"]:
+                    qualified_matches.append(match_item)
+                else:
+                    unqualified_matches.append(match_item)
+
             qualified_matches.sort(key=lambda x: x['match_score'], reverse=True)
             unqualified_matches.sort(key=lambda x: x['match_score'], reverse=True)
             

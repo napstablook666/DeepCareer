@@ -6,14 +6,18 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from datetime import datetime
 
-try:
-    from pgvector.sqlalchemy import Vector as VECTOR
-except ImportError:
-    # 如果pgvector未安装，使用Text作为后备
-    VECTOR = lambda dim: Text
-
 from backend.database.connection import Base
 from backend.config import settings
+
+if settings.USE_PGVECTOR:
+    try:
+        from pgvector.sqlalchemy import Vector as VECTOR
+    except ImportError as exc:
+        raise RuntimeError(
+            "USE_PGVECTOR=true 但 Python pgvector 未安装，请安装依赖或设置 USE_PGVECTOR=false"
+        ) from exc
+else:
+    VECTOR = None
 
 
 class JobV2(Base):
@@ -62,7 +66,7 @@ class JobV2(Base):
     
     # 向量字段
     description_embedding = Column(
-        VECTOR(settings.EMBEDDING_DIMENSION),
+        VECTOR(settings.EMBEDDING_DIMENSION) if VECTOR else JSONB,
         nullable=True,
         comment="职位描述向量"
     )

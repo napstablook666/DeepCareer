@@ -15,7 +15,7 @@ export default function Resume() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [dragActive, setDragActive] = useState(false)
-  const [useLlm, setUseLlm] = useState(false)
+  const [useLlm, setUseLlm] = useState(true)
   const inputRef = useRef(null)
 
   // 加载简历列表
@@ -327,7 +327,7 @@ export default function Resume() {
               <p className="text-center text-xs text-gray-400">
                 {useLlm 
                   ? '使用AI大模型深度理解简历内容，提取更准确（较慢）' 
-                  : '使用规则快速提取简历信息（推荐）'}
+                  : '使用规则快速提取简历信息，复杂简历建议使用AI'}
               </p>
 
               {/* 操作按钮 */}
@@ -421,6 +421,18 @@ export default function Resume() {
           </button>
         )}
       </div>
+
+      {resumeInfo.embedding_status === 'unavailable' && (
+        <div className="card p-4 mb-6 bg-amber-50 border-amber-100 flex items-start gap-3">
+          <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
+          <div>
+            <p className="font-medium text-amber-800">向量服务暂不可用</p>
+            <p className="text-sm text-amber-700 mt-1">
+              简历文本已保存，职位匹配将暂时使用结构化信息；恢复向量服务后可重新生成。
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* 基本信息 */}
@@ -590,6 +602,34 @@ export default function Resume() {
             <p className="text-sm text-gray-400">暂无项目经历</p>
           )}
         </div>
+
+        {/* 获奖荣誉 */}
+        {data.awards?.length > 0 && (
+          <div className="card p-6 md:col-span-2">
+            <h3 className="font-semibold flex items-center gap-2 mb-4">
+              <Award size={18} className="text-primary-500" />
+              获奖荣誉
+            </h3>
+            <div className="space-y-4">
+              {data.awards.map((award, i) => (
+                <div key={i} className="text-sm border-l-2 border-amber-200 pl-4">
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <p className="font-medium">{award.name}</p>
+                      {award.issuer && <p className="text-gray-600">{award.issuer}</p>}
+                    </div>
+                    {award.date && (
+                      <span className="text-gray-400 text-xs whitespace-nowrap">{award.date}</span>
+                    )}
+                  </div>
+                  {award.description && (
+                    <p className="text-gray-600 mt-2">{award.description}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 技能 */}
         <div className="card p-6">

@@ -4,10 +4,10 @@
 
 <h1 align="center">DeepCareer</h1>
 
-<p align="center">AI-powered intelligent job recommendation and resume analysis system.</p>
+<p align="center">AI 驱动的智能职位推荐与简历分析系统。</p>
 
 <p align="center">
-  <a href="./README.zh-CN.md">简体中文</a>
+  <a href="./README.md">English</a>
 </p>
 
 <p align="center">
@@ -19,87 +19,87 @@
   <img src="https://img.shields.io/badge/License-MIT-22C55E?style=flat-square" alt="License MIT">
 </p>
 
-An all-in-one job-seeking solution that combines multi-dimensional matching algorithms, vector semantic search, and a real-time job crawler to help you find the right position faster.
+基于多维度匹配算法、向量语义搜索和实时爬虫的一站式求职解决方案，帮助你更快找到合适的工作。
 
-## Highlights
+## 亮点
 
-| Highlight | Why it matters |
-|-----------|----------------|
-| Smart resume parsing | Extracts structured information from PDF, DOCX, and images using rule-based and LLM extraction |
-| Multi-dimensional job matching | Scores across 5 dimensions: position direction, skills, experience, education, and semantic similarity |
-| Real-time job crawling | Playwright-based crawler with cookie authentication, random UA, and intelligent request throttling |
-| Streaming match responses | SSE-powered real-time streaming that crawls and matches simultaneously |
-| Vector search with reranking | Uses bge-m3 embedding and bge-reranker-v2-m3 via Gitee AI / ModelScope free-tier API |
-| Dual extraction mode | Rule-based extraction (fast, free) for common cases, LLM extraction (high precision) for complex resumes |
+| 亮点 | 说明 |
+|------|------|
+| 智能简历解析 | 支持 PDF、DOCX、图片格式，规则提取（免费快速）+ LLM 提取（高精度）双模式 |
+| 多维度职位匹配 | 职位方向、技能、经验、学历、语义相似度 5 维评分，权重可配置 |
+| 实时职位爬取 | 基于 Playwright 的浏览器自动化爬虫，支持 Cookie 认证、随机 UA、智能延迟 |
+| 流式匹配响应 | SSE（Server-Sent Events）实时推送，边爬边匹配，无需等待全量完成 |
+| 向量搜索与重排 | 使用 bge-m3 向量模型 + bge-reranker-v2-m3 重排模型，通过模力方舟（Gitee AI）免费接口调用 |
+| 双模式提取 | 规则提取速度快、零成本；LLM 提取精度高，适合复杂简历 |
 
-## Architecture
+## 系统架构
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│                         Client Layer                             │
+│                         客户端层                                  │
 │  ┌──────────────────┐          ┌──────────────────────────────┐  │
-│  │  React + Vite    │          │  CLI (deepcareer command)    │  │
-│  │  (Web interface) │          │  (crawl / serve / dev)       │  │
+│  │  React + Vite    │          │  CLI（deepcareer 命令）      │  │
+│  │  （Web 界面）    │          │  (crawl / serve / dev)       │  │
 │  └────────┬─────────┘          └──────────────┬───────────────┘  │
 └───────────┼────────────────────────────────────┼──────────────────┘
             │ HTTP / SSE                         │
             ▼                                     ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                     API Layer (FastAPI)                          │
+│                      API 层（FastAPI）                            │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
-│  │ Resume   │ │  Job     │ │  Smart   │ │ Crawler  │ │Health │  │
-│  │ API      │ │  API     │ │  Match   │ │ API      │ │       │  │
+│  │ 简历     │ │ 职位     │ │ 智能匹配  │ │ 爬虫     │ │ 健康  │  │
+│  │ API      │ │ API      │ │ API      │ │ API      │ │ 检查  │  │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └───────┘  │
 └──────────────────────────────────────────────────────────────────┘
             │
             ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                       Service Layer                              │
+│                        服务层                                     │
 │  ┌────────────────┐ ┌────────────────┐ ┌──────────────────────┐  │
-│  │  Extractor     │ │   Matcher      │ │  Embedding / Rerank  │  │
-│  │  (rule + LLM)  │ │  (5-dim score) │ │  (bge-m3 / reranker) │  │
+│  │  提取服务      │ │  匹配服务      │ │  Embedding / Rerank  │  │
+│  │  (规则+LLM)    │ │  (5 维评分)    │ │  (bge-m3 / reranker) │  │
 │  └────────────────┘ └────────────────┘ └──────────────────────┘  │
 │  ┌────────────────┐ ┌────────────────┐                          │
-│  │  Playwright    │ │  Cache Service │                          │
-│  │  Crawler       │ │  (Redis, opt.) │                          │
+│  │  Playwright    │ │  缓存服务      │                          │
+│  │  爬虫          │ │  (Redis，可选)  │                          │
 │  └────────────────┘ └────────────────┘                          │
 └──────────────────────────────────────────────────────────────────┘
             │                        │
             ▼                        ▼
 ┌────────────────────┐   ┌────────────────────┐
-│   PostgreSQL 17    │   │  Redis 7 (optional) │
-│   + pgvector       │   │  (cache)            │
+│   PostgreSQL 17    │   │  Redis 7（可选）    │
+│   + pgvector       │   │  （缓存）           │
 └────────────────────┘   └────────────────────┘
             │
             ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                     External APIs                                │
+│                       外部 API                                   │
 │  ┌─────────────────────┐  ┌──────────────────────────────────┐   │
-│  │  OpenAI-compatible  │  │  Gitee AI / ModelScope           │   │
-│  │  LLM (optional)     │  │  (free bge-m3 + reranker)        │   │
+│  │  OpenAI 兼容 LLM    │  │  模力方舟 / Gitee AI             │   │
+│  │  （可选）           │  │  （免费 bge-m3 + reranker）       │   │
 │  └─────────────────────┘  └──────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Usage examples
+## 使用示例
 
-### CLI: crawl and match from the terminal
+### CLI: 终端中爬取与匹配
 
 ```bash
-# Install the CLI
+# 安装命令行工具
 pip install -e .
 
-# Crawl job listings from BOSS Zhipin
-deepcareer crawl -c "Shenzhen" -k "Python" -n 20
+# 从 BOSS 直聘爬取职位
+deepcareer crawl -c "深圳" -k "Python" -n 20
 
-# Start the API server
+# 启动 API 服务
 deepcareer serve -p 8001
 
-# List supported cities
+# 列出支持的城市
 deepcareer cities
 ```
 
-### API: smart match with SSE streaming
+### API: SSE 流式智能匹配
 
 ```bash
 POST /api/v2/smart-match/stream
@@ -111,138 +111,138 @@ Content-Type: application/json
 }
 ```
 
-Response is a Server-Sent Events stream. Each event carries a partial match result — started, progress, completed, or error. The client receives results as they become available rather than waiting for the full batch.
+响应为 Server-Sent Events 流，每个事件携带部分匹配结果（开始、进度、完成或错误）。客户端可以逐条接收结果，无需等待全量处理完毕。
 
-### Web interface
+### Web 界面
 
-Browse to `http://localhost:3000` after starting both backend and frontend services to upload resumes, browse job listings, and trigger smart matches through a graphical interface.
+前后端都启动后，访问 `http://localhost:3000`，可以通过图形界面上传简历、浏览职位、触发智能匹配。
 
-## Quick Install
+## 快速安装
 
-### Prerequisites
+### 环境要求
 
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Python | 3.11+ | Recommended 3.11.x |
-| Node.js | 18+ | LTS version recommended |
-| PostgreSQL | 17+ | Requires pgvector extension |
-| Redis | 7+ | Optional, for caching |
+| 依赖 | 版本 | 说明 |
+|------|------|------|
+| Python | 3.11+ | 推荐 3.11.x |
+| Node.js | 18+ | 建议使用 LTS 版本 |
+| PostgreSQL | 17+ | 需要 pgvector 扩展 |
+| Redis | 7+ | 可选，用于缓存 |
 
-### Docker (recommended for new users)
+### Docker 一键部署（推荐新手）
 
 ```bash
 git clone https://github.com/Zijie933/DeepCareer.git
 cd DeepCareer
 cp .env.example .env
-# Edit .env with your OpenAI API key (optional) and BOSS_COOKIE
+# 编辑 .env，填入 OpenAI API Key（可选）和 BOSS_COOKIE
 docker-compose up -d
 ```
 
-Services start at:
-- Web interface: http://localhost:3000
-- API docs (Swagger): http://localhost:8001/docs
+启动后访问：
+- Web 界面：http://localhost:3000
+- API 文档（Swagger）：http://localhost:8001/docs
 
-### Local development
+### 本地开发
 
 ```bash
-# Python virtual environment
+# Python 虚拟环境
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 playwright install chromium
 pip install -e .
 
-# Configure environment
+# 配置环境变量
 cp .env.example .env
 
-# Initialize database
+# 初始化数据库
 psql -U admin -d deepcareer -f database/init_db.sql
 
-# Start backend
+# 启动后端
 deepcareer serve -p 8001
 
-# In another terminal, start frontend
+# 另开终端，启动前端
 cd frontend
 npm install
 npm run dev
 ```
 
-## Quick Start
+## 快速开始
 
-The fastest way to see DeepCareer in action:
+最快捷的体验方式：
 
 ```bash
-# 1. Clone and start with Docker
+# 1. 克隆并用 Docker 启动
 git clone https://github.com/Zijie933/DeepCareer.git
 cd DeepCareer
 cp .env.example .env
 docker-compose up -d
 
-# 2. Verify the API is running
+# 2. 验证 API 是否正常运行
 curl http://localhost:8001/health
 
-# 3. Upload a resume
+# 3. 上传简历
 curl -X POST http://localhost:8001/api/v2/resumes/upload \
   -F "file=@resume.pdf"
 
-# 4. Crawl job listings
-deepcareer crawl -c "Shenzhen" -k "Python" -n 10
+# 4. 爬取职位
+deepcareer crawl -c "深圳" -k "Python" -n 10
 
-# 5. Run a smart match
+# 5. 执行智能匹配
 curl -X POST http://localhost:8001/api/v2/smart-match \
   -H "Content-Type: application/json" \
   -d '{"resume_id": 1, "max_jobs": 5}'
 ```
 
-## Configuration
+## 配置说明
 
-Core environment variables (`.env`):
+核心环境变量（`.env`）：
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | No | OpenAI-compatible API key for LLM extraction |
-| `MAGIC_ARK_API_KEY` | No | Gitee AI / ModelScope API key for embedding/rerank |
-| `BOSS_COOKIE` | Yes (for crawler) | Cookie from zhipin.com authenticated session |
-| `POSTGRES_HOST` | Yes | PostgreSQL server address |
-| `POSTGRES_DB` | Yes | Database name (default: deepcareer) |
-| `POSTGRES_USER` | Yes | Database user |
-| `POSTGRES_PASSWORD` | Yes | Database password |
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `OPENAI_API_KEY` | 否 | OpenAI 兼容的 API 密钥，用于 LLM 提取 |
+| `MAGIC_ARK_API_KEY` | 否 | 模力方舟 / Gitee AI 密钥，用于向量嵌入和重排 |
+| `BOSS_COOKIE` | 爬虫需要 | BOSS 直聘登录后的 Cookie |
+| `POSTGRES_HOST` | 是 | PostgreSQL 地址 |
+| `POSTGRES_DB` | 是 | 数据库名（默认：deepcareer） |
+| `POSTGRES_USER` | 是 | 数据库用户 |
+| `POSTGRES_PASSWORD` | 是 | 数据库密码 |
 
-Matching weights (configurable):
+匹配权重（可配置）：
 
-| Dimension | Default weight |
-|-----------|----------------|
-| Position direction | 0.30 |
-| Skills | 0.25 |
-| Experience | 0.20 |
-| Education | 0.15 |
-| Semantic similarity | 0.10 |
+| 维度 | 默认权重 |
+|------|----------|
+| 职位方向 | 0.30 |
+| 技能匹配 | 0.25 |
+| 经验匹配 | 0.20 |
+| 学历匹配 | 0.15 |
+| 语义相似度 | 0.10 |
 
-## Documentation
+## 文档导航
 
-| Topic | What it covers | Link |
-|-------|----------------|------|
-| Technical architecture | Multi-agent collaboration, matching algorithm, crawler design | [TECHNICAL.md](./TECHNICAL.md) |
-| API reference | Resume, job, smart match, and crawler endpoints | [docs/api](./docs/api) or Swagger UI |
-| CLI commands | crawl, serve, dev, frontend, cities | [TECHNICAL.md#cli](./TECHNICAL.md#cli-command-line-tools) |
-| Database schema | Table definitions, indexes, vector search setup | [database/schema_v2.sql](./database/schema_v2.sql) |
+| 主题 | 内容 | 链接 |
+|------|------|------|
+| 技术架构 | 多 Agent 协作、匹配算法、爬虫设计 | [TECHNICAL.md](./TECHNICAL.md) |
+| API 参考 | 简历、职位、智能匹配、爬虫端点 | [docs/api](./docs/api) 或 Swagger UI |
+| CLI 命令 | crawl, serve, dev, frontend, cities | [TECHNICAL.md#cli](./TECHNICAL.md#cli-command-line-tools) |
+| 数据库设计 | 表定义、索引、向量搜索配置 | [database/schema_v2.sql](./database/schema_v2.sql) |
 
-## Contributing
+## 贡献
 
-Contributions are welcome. Please open an issue first to discuss your proposal.
+欢迎提交 Issue 和 Pull Request！
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 提交 Pull Request
 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Zijie933%2FDeepCareer&type=Date)](https://star-history.com/#Zijie933/DeepCareer&Date)
 
-## License
+## 许可证
 
-Distributed under the MIT License. See [LICENSE](./LICENSE) for more information.
+本项目采用 MIT 许可证。详见 [LICENSE](./LICENSE) 文件。

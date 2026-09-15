@@ -4,7 +4,7 @@
 """
 import re
 from typing import List, Dict, Tuple
-from sentence_transformers import SentenceTransformer
+from backend.utils.embedding_service import get_embedding_service
 from numpy import dot
 from numpy.linalg import norm
 import jieba
@@ -14,9 +14,9 @@ import jieba.analyse
 class SmartMatcher:
     """智能简历-职位匹配器"""
     
-    def __init__(self, model_name: str = "shibing624/text2vec-base-chinese"):
-        """初始化匹配器"""
-        self.model = SentenceTransformer(model_name)
+    def __init__(self):
+        """初始化匹配器；语义向量由模力方舟远程服务生成。"""
+        self.embedding_service = get_embedding_service()
         
         # 技术栈关键词库（可扩展）
         self.tech_keywords = {
@@ -93,8 +93,8 @@ class SmartMatcher:
     
     def semantic_similarity(self, text1: str, text2: str) -> float:
         """语义相似度"""
-        emb1 = self.model.encode(text1)
-        emb2 = self.model.encode(text2)
+        embeddings = self.embedding_service.create_embedding([text1, text2])
+        emb1, emb2 = embeddings
         return dot(emb1, emb2) / (norm(emb1) * norm(emb2))
     
     def section_match_score(self, resume_sections: Dict[str, str], 

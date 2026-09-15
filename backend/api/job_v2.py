@@ -10,13 +10,13 @@ from pydantic import BaseModel
 from backend.database.connection import get_db
 from backend.models.job_v2 import JobV2
 from backend.services.extractor_service import ExtractorService
-from backend.utils.local_embedding import LocalEmbeddingService
+from backend.utils.embedding_service import get_embedding_service
 from backend.utils.logger import logger
 
 router = APIRouter(prefix="/api/v2/jobs", tags=["职位V2"])
 
 extractor = ExtractorService()
-embedding_service = LocalEmbeddingService()
+embedding_service = get_embedding_service()
 
 
 class JobCreateRequest(BaseModel):
@@ -78,8 +78,11 @@ async def create_job(
     try:
         embedding = embedding_service.create_embedding(request.full_description[:1000])
     except Exception as e:
-        logger.warning(f"向量生成失败: {e}")
-        embedding = None
+        logger.error(f"模力方舟 Embedding 生成失败: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"模力方舟 Embedding 生成失败: {e}",
+        ) from e
     
     # 保存到数据库
     job = JobV2(
@@ -251,10 +254,7 @@ async def batch_create_jobs(
                 structured_data['company'] = job_req.company_name
             
             # 向量
-            try:
-                embedding = embedding_service.create_embedding(job_req.full_description[:1000])
-            except:
-                embedding = None
+            embedding = embedding_service.create_embedding(job_req.full_description[:1000])
             
             # 保存
             job = JobV2(

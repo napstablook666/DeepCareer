@@ -47,6 +47,17 @@ services:
     container_name: deepcareer_app
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - MAGIC_ARK_API_KEY=${MAGIC_ARK_API_KEY:-}
+      - MAGIC_ARK_BASE_URL=${MAGIC_ARK_BASE_URL:-https://us.picpi.top}
+      - MAGIC_ARK_EMBEDDING_MODEL=${MAGIC_ARK_EMBEDDING_MODEL:-bge-m3}
+      - MAGIC_ARK_RERANK_MODEL=${MAGIC_ARK_RERANK_MODEL:-bge-reranker-v2-m3}
+      - MAGIC_ARK_TIMEOUT=${MAGIC_ARK_TIMEOUT:-60}
+      - MAGIC_ARK_MAX_RETRIES=${MAGIC_ARK_MAX_RETRIES:-2}
+      - EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1024}
+      - RERANK_CANDIDATE_LIMIT=${RERANK_CANDIDATE_LIMIT:-50}
+      - USE_PGVECTOR=${USE_PGVECTOR:-true}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-deepcareer}

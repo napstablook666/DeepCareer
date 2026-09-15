@@ -16,11 +16,18 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_MAX_RETRIES: int = 3
-    OPENAI_TIMEOUT: int = 60
-    
-    # ========== 本地 Embedding 配置 ==========
-    USE_LOCAL_EMBEDDING: bool = True  # 是否使用本地Embedding
-    LOCAL_EMBEDDING_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"  # 本地模型名(384维)
+    OPENAI_TIMEOUT: int = 120
+
+    # ========== 模力方舟 Embedding / Rerank 配置 ==========
+    # 未单独配置 MAGIC_ARK_API_KEY 时，远程服务会复用 OPENAI_API_KEY。
+    MAGIC_ARK_API_KEY: str = ""
+    MAGIC_ARK_BASE_URL: str = "https://us.picpi.top"
+    MAGIC_ARK_EMBEDDING_MODEL: str = "bge-m3"
+    MAGIC_ARK_RERANK_MODEL: str = "bge-reranker-v2-m3"
+    MAGIC_ARK_TIMEOUT: int = 60
+    MAGIC_ARK_MAX_RETRIES: int = 2
+    REQUIRE_EMBEDDING: bool = False
+    USE_PGVECTOR: bool = True  # PostgreSQL 是否启用 pgvector 扩展
     
     # ========== 数据库配置 ==========
     POSTGRES_HOST: str = "localhost"
@@ -89,8 +96,9 @@ class Settings(BaseSettings):
     BOSS_COOKIE: str = ""  # BOSS直聘Cookie，可通过环境变量BOSS_COOKIE设置
     
     # ========== 向量搜索配置 ==========
-    EMBEDDING_DIMENSION: int = 384  # paraphrase-multilingual-MiniLM-L12-v2
+    EMBEDDING_DIMENSION: int = 1024  # bge-m3
     VECTOR_SEARCH_LIMIT: int = 50
+    RERANK_CANDIDATE_LIMIT: int = 50
     
     # ========== 匹配算法配置 ==========
     # 7维度权重

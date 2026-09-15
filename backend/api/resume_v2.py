@@ -5,19 +5,21 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import Optional
+import asyncio
 import os
 
 from backend.database.connection import get_db
 from backend.models.resume_v2 import ResumeV2
 from backend.services.extractor_service import ExtractorService
 from backend.services.resume_parser import ResumeParser
-from backend.utils.local_embedding import LocalEmbeddingService
+from backend.utils.embedding_service import get_embedding_service
 from backend.utils.logger import logger
+from backend.config import settings
 
 router = APIRouter(prefix="/api/v2/resumes", tags=["简历V2"])
 
 extractor = ExtractorService()
-embedding_service = LocalEmbeddingService()
+embedding_service = get_embedding_service()
 
 
 async def extract_text_from_file(file_path: str, file_type: str) -> str:
@@ -30,11 +32,28 @@ async def extract_text_from_file(file_path: str, file_type: str) -> str:
     return result["text"]
 
 
+async def generate_embedding(text: str, operation: str):
+    """生成向量；向量服务故障不应掩盖已经完成的文件解析。"""
+    try:
+        embedding = await asyncio.to_thread(
+            embedding_service.create_embedding,
+            text,
+        )
+        return embedding, None
+    except Exception as exc:
+        detail = f"模力方舟 Embedding {operation}失败: {exc}"
+        if settings.REQUIRE_EMBEDDING:
+            raise HTTPException(status_code=502, detail=detail) from exc
+
+        logger.warning(f"{detail}；继续保存无向量的简历")
+        return None, detail
+
+
 @router.post("/upload")
 async def upload_resume(
     file: UploadFile = File(...),
     user_id: Optional[str] = Form(None),
-    use_llm: bool = Form(False),
+    use_llm: bool = Form(True),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -43,7 +62,7 @@ async def upload_resume(
     Args:
         file: 简历文件（支持PDF/DOCX/TXT）
         user_id: 用户ID（可选）
-        use_llm: 是否允许使用大模型提取（默认False，只用规则）
+        use_llm: 是否使用大模型提取（默认True）
     
     Returns:
         {
@@ -81,11 +100,10 @@ async def upload_resume(
     )
     
     # 4. 生成向量（异步）
-    try:
-        embedding = embedding_service.create_embedding(full_text[:1000])  # 取前1000字
-    except Exception as e:
-        logger.warning(f"向量生成失败: {e}")
-        embedding = None
+    embedding, embedding_error = await generate_embedding(
+        full_text[:1000],
+        "生成",
+    )
     
     # 5. 保存到数据库
     resume = ResumeV2(
@@ -112,7 +130,17 @@ async def upload_resume(
         "structured_data": structured_data,
         "extraction_method": method,
         "extraction_confidence": round(confidence, 2),
-        "message": "简历已解析，请在表单中确认或补充信息" if confidence < 0.9 else "简历解析完成"
+        "embedding_status": "ready" if embedding is not None else "unavailable",
+        "embedding_error": embedding_error,
+        "message": (
+            "简历已解析，但向量服务暂不可用；职位语义匹配会降级为结构化匹配"
+            if embedding_error
+            else (
+                "简历已解析，请在表单中确认或补充信息"
+                if confidence < 0.9
+                else "简历解析完成"
+            )
+        ),
     }
 
 
@@ -139,24 +167,31 @@ async def confirm_resume(
     resume.user_confirmed = True
     
     # 重新生成向量（如果文本有变化）
-    try:
-        # 将结构化数据转为文本
-        text_parts = []
-        for key, value in structured_data.items():
-            if isinstance(value, list):
-                text_parts.append(' '.join(str(v) for v in value))
-            elif value:
-                text_parts.append(str(value))
-        
-        combined_text = ' '.join(text_parts)
-        resume.text_embedding = embedding_service.create_embedding(combined_text)
-    except Exception as e:
-        logger.warning(f"向量更新失败: {e}")
+    # 将结构化数据转为文本
+    text_parts = []
+    for key, value in structured_data.items():
+        if isinstance(value, list):
+            text_parts.append(' '.join(str(v) for v in value))
+        elif value:
+            text_parts.append(str(value))
+
+    combined_text = ' '.join(text_parts)
+    embedding, embedding_error = await generate_embedding(combined_text, "更新")
+    resume.text_embedding = embedding
     
     await db.commit()
     
     logger.info(f"简历{resume_id}已确认")
-    return {"message": "简历信息已确认", "id": resume_id}
+    return {
+        "message": (
+            "简历信息已确认，但向量服务暂不可用"
+            if embedding_error
+            else "简历信息已确认"
+        ),
+        "id": resume_id,
+        "embedding_status": "ready" if embedding is not None else "unavailable",
+        "embedding_error": embedding_error,
+    }
 
 
 @router.post("/{resume_id}/extract-with-llm")

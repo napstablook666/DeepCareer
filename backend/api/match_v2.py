@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import Optional, List
+import json
 from pydantic import BaseModel
 
 from backend.database.connection import get_db
@@ -46,9 +47,9 @@ async def fast_match(
     - 实时响应
     
     特点：
-    - 速度快（毫秒级）
-    - 成本低（无API调用）
-    - 准确度中等（80%）
+    - 先用规则和向量完成候选筛选
+    - 使用模力方舟重排候选结果
+    - 按综合匹配分数返回 Top N
     
     Args:
         request: 匹配请求
@@ -89,8 +90,12 @@ async def fast_match(
     
     # 3. 批量匹配
     results = []
-    
+    job_documents = {}
+    pending_records = {}
+    cached_records = {}
+
     for job in jobs:
+        job_documents[job.id] = job.full_description or job.title or ""
         # 检查是否已有缓存
         cache_result = await db.execute(
             select(MatchRecord).where(
@@ -102,6 +107,7 @@ async def fast_match(
         cached = cache_result.scalar_one_or_none()
         
         if cached:
+            cached_records[job.id] = cached
             # 使用缓存
             results.append({
                 'job_id': job.id,
@@ -132,6 +138,7 @@ async def fast_match(
                     fast_details=details
                 )
                 db.add(match_record)
+                pending_records[job.id] = match_record
                 
                 results.append({
                     'job_id': job.id,
@@ -148,6 +155,30 @@ async def fast_match(
                 logger.error(f"匹配失败 job_id={job.id}: {e}")
                 continue
     
+    if results:
+        try:
+            query_text = resume.full_text or json.dumps(
+                resume.structured_data or {}, ensure_ascii=False
+            )
+            results = matcher.apply_rerank(
+                query_text=query_text,
+                matches=results,
+                documents=[job_documents[item['job_id']] for item in results],
+            )
+        except Exception as exc:
+            await db.rollback()
+            logger.error(f"模力方舟重排失败: {exc}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"模力方舟重排失败: {exc}",
+            ) from exc
+
+        for item in results:
+            record = pending_records.get(item['job_id']) or cached_records.get(item['job_id'])
+            if record:
+                record.fast_score = item['match_score']
+                record.fast_details = item['match_details']
+
     await db.commit()
     
     # 4. 排序并返回Top K

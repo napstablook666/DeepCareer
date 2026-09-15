@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 60000,
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -47,7 +47,7 @@ export const jobApi = {
 // 简历相关API (V2)
 export const resumeApi = {
   // 上传简历
-  upload: (file, useLlm = false) => {
+  upload: (file, useLlm = true) => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('use_llm', useLlm)

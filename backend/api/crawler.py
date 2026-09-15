@@ -12,14 +12,14 @@ from backend.database.connection import get_db
 from backend.crawlers.boss_web_crawler_playwright import BossWebCrawlerPlaywright
 from backend.models.job_v2 import JobV2
 from backend.services.extractor_service import ExtractorService
-from backend.utils.local_embedding import LocalEmbeddingService
+from backend.utils.embedding_service import get_embedding_service
 from backend.utils.logger import logger
 from backend.config import settings
 
 router = APIRouter(prefix="/api/crawler", tags=["爬虫"])
 
 extractor = ExtractorService()
-embedding_service = LocalEmbeddingService()
+embedding_service = get_embedding_service()
 
 
 class CrawlRequest(BaseModel):
@@ -173,8 +173,10 @@ async def crawl_boss_jobs(
                         # 生成向量
                         try:
                             embedding = embedding_service.create_embedding(full_desc[:1000])
-                        except:
-                            embedding = None
+                        except Exception as e:
+                            raise RuntimeError(
+                                f"模力方舟 Embedding 生成失败: {e}"
+                            ) from e
                         
                         # 保存
                         job_record = JobV2(

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS resumes (
     confirmed_at TIMESTAMP WITH TIME ZONE,
     
     -- 向量字段
-    text_embedding VECTOR(384),  -- 384维 paraphrase-multilingual-MiniLM-L12-v2
+    text_embedding VECTOR(1024),  -- 1024维 bge-m3
     
     -- AI分析结果（可选）
     ai_analysis JSONB,
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     extracted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     
     -- 向量字段
-    description_embedding VECTOR(384),
+    description_embedding VECTOR(1024),
     
     -- 状态
     is_active BOOLEAN DEFAULT TRUE,
